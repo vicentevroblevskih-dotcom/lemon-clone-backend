@@ -1,0 +1,6 @@
+{
+  "name": "lemon-clone-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend que recebe pedidos do plugin de Roblox Studio e gera codigo Luau via IA."
+}
