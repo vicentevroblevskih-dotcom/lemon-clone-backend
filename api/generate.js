@@ -119,6 +119,7 @@ Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStor
 			"StarterCharacterScripts",
 			"Workspace",
 			"ReplicatedStorage",
+			"StarterGui"
 		];
 		if (!validDestinations.includes(destination)) {
 			destination = "ServerScriptService";
