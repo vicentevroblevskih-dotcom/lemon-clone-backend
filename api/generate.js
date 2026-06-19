@@ -4,10 +4,10 @@
 // Recebe: { prompt: "descricao do que o usuario quer" }
 // Devolve: { code: "codigo luau gerado" }
 //
-// Usa a API do Google Gemini (tem cota gratuita).
-// Precisa configurar a variavel de ambiente GEMINI_API_KEY no Vercel
+// Usa a API da Groq (tem modelos gratuitos/baratos e rapidos).
+// Precisa configurar a variavel de ambiente GROQ_API_KEY no Vercel
 // (Project Settings > Environment Variables).
-// Pegue a chave de graca em: https://aistudio.google.com/app/apikey
+// Pegue a chave de graca em: https://console.groq.com/keys
 
 export default async function handler(req, res) {
 	// Permitir requests vindos do plugin do Roblox Studio
@@ -29,9 +29,9 @@ export default async function handler(req, res) {
 		return res.status(400).json({ error: "Campo 'prompt' obrigatorio." });
 	}
 
-	const apiKey = process.env.GEMINI_API_KEY;
+	const apiKey = process.env.GROQ_API_KEY;
 	if (!apiKey) {
-		return res.status(500).json({ error: "GEMINI_API_KEY nao configurada no servidor." });
+		return res.status(500).json({ error: "GROQ_API_KEY nao configurada no servidor." });
 	}
 
 	const systemPrompt = `Voce e um especialista em Luau e na API do Roblox.
@@ -41,24 +41,19 @@ Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStor
 Responda SOMENTE com o codigo, nada mais.`;
 
 	try {
-		const model = "gemini-2.0-flash";
-		const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-		const response = await fetch(url, {
+		const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
+				"Authorization": `Bearer ${apiKey}`,
 			},
 			body: JSON.stringify({
-				systemInstruction: {
-					parts: [{ text: systemPrompt }],
-				},
-				contents: [
-					{
-						role: "user",
-						parts: [{ text: prompt }],
-					},
+				model: "llama-3.3-70b-versatile",
+				messages: [
+					{ role: "system", content: systemPrompt },
+					{ role: "user", content: prompt },
 				],
+				max_tokens: 2000,
 			}),
 		});
 
@@ -68,7 +63,7 @@ Responda SOMENTE com o codigo, nada mais.`;
 		}
 
 		const data = await response.json();
-		let code = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+		let code = data.choices?.[0]?.message?.content || "";
 
 		// Remove cercas de codigo se a IA mandar por engano
 		code = code.replace(/^```(?:lua|luau)?\s*/i, "").replace(/```\s*$/i, "").trim();
