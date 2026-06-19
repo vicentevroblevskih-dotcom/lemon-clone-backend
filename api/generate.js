@@ -47,24 +47,51 @@ Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente co
 
 Regra de ouro: se o pedido menciona "personagem", "character", "humanoid", "animacao do jogador" -> "StarterCharacterScripts". Se mencionar "interface", "GUI", "UI", "tela", "menu", "HUD", "botao", "painel", "inventario visual", "loja visual" -> "StarterGui".
 
-QUANDO O DESTINO FOR "StarterGui", siga rigorosamente estas regras de design (interfaces malfeitas sao o erro mais comum, evite a todo custo):
-- Crie um ScreenGui com IgnoreGuiInset = true e ResetOnSpawn = false.
-- Use Size em Scale (UDim2.fromScale) para os elementos principais, nunca pixels fixos grandes; use Offset apenas para detalhes pequenos (padding, icones).
-- TODO Frame/botao deve ter um UICorner (CornerRadius entre 8 e 16 px) para cantos arredondados; nunca deixe cantos quadrados crus.
-- Use uma paleta de cor coesa e moderna: fundo escuro (ex: Color3.fromRGB(24,24,28) ou Color3.fromRGB(30,30,36)), uma cor de destaque vibrante (ex: amarelo, azul ou verde), texto branco ou cinza claro (Color3.fromRGB(235,235,235)).
-- Use UIListLayout ou UIGridLayout com Padding definido (UDim.new(0,8) a UDim.new(0,12)) para organizar elementos, em vez de posicionar tudo manualmente com Position.
-- Use UIPadding em containers para dar respiro interno (8 a 16px).
-- Botoes devem ter BackgroundColor3 com cor de destaque, TextColor3 contrastante, Font = Enum.Font.GothamBold ou Enum.Font.SourceSansBold, TextSize entre 16 e 22.
-- Use AnchorPoint = Vector2.new(0.5, 0.5) e Position em Scale 0.5,0.5 para centralizar janelas/paineis na tela.
-- Adicione UIStroke sutil (Thickness 1-2, cor semi-transparente) em paineis principais para profundidade, quando fizer sentido.
-- Nomeie as instancias de forma clara (ex: "MainFrame", "TitleLabel", "CloseButton").
-- Sempre parent o ScreenGui em "script.Parent" (pois o LocalScript estara dentro do StarterGui, e o jogo clona automaticamente pro PlayerGui).
+// Substitua o trecho correspondente no seu systemPrompt por este:
+
+QUANDO O DESTINO FOR "StarterGui", siga rigorosamente estas regras de design e estrutura. Interfaces malfeitas ou confusas destroem a experiência, evite a todo custo:
+
+1. HIERARQUIA OBRIGATÓRIA DA INTERFACE:
+   - Crie um ScreenGui (propriedades: IgnoreGuiInset = true, ResetOnSpawn = false). Ele deve ser o pai de tudo.
+   - Crie um Frame principal ("MainFrame") centralizado. Use AnchorPoint = Vector2.new(0.5, 0.5) e Position = UDim2.fromScale(0.5, 0.5).
+   - Dentro do MainFrame, crie obrigatoriamente:
+     * Um TextLabel para o título ("TitleLabel").
+     * Um TextButton para fechar a interface ("CloseButton") posicionado no canto superior direito.
+     * Um ScrollingFrame ("ItemContainer") para listar os itens/produtos se for uma loja ou inventário.
+   - Sempre defina o Parent de cada elemento criado de forma explícita e correta. O ScreenGui final deve ter seu Parent definido como `script.Parent`.
+
+2. REGRAS VISUAIS DE DESIGN MODERNO:
+   - Cantos Arredondados: TODO Frame, Botão, TextBox ou Container deve possuir um UICorner filho (CornerRadius entre 8 e 12 pixels). Nunca deixe cantos retos e quadrados crus.
+   - Dimensionamento Responsivo: Use sempre Scale para o tamanho (Size) e posição (Position) dos elementos principais (ex: UDim2.fromScale(0.4, 0.6) para a janela). Só use Offset (pixels fixos) para detalhes muito pequenos, padding interno ou espessura de bordas.
+   - Organização Limpa: Para listas de itens, use um UIListLayout ou UIGridLayout dentro do container de itens. Configure o Padding do layout (ex: UDim.new(0, 10)) para que os itens não fiquem colados. Use UIPadding nos containers para dar um respiro interno (margens de 12 a 16px).
+   - Paleta de Cores Coesa e Dark/Moderna:
+     * Fundo Principal (MainFrame): Grafite escuro / Quase preto (Color3.fromRGB(25, 25, 28) ou Color3.fromRGB(32, 32, 36)).
+     * Container de Itens: Um tom levemente mais claro ou mais escuro que o fundo para dar profundidade (Color3.fromRGB(40, 40, 45)).
+     * Cor de Destaque (Botões de compra/seleção): Amarelo Limonada vibrante (Color3.fromRGB(255, 221, 87)) ou Azul Moderno (Color3.fromRGB(0, 162, 255)).
+     * Textos: Branco puro para títulos (Color3.fromRGB(255, 255, 255)) e Cinza claro para descrições/preços (Color3.fromRGB(200, 200, 200)).
+   - Tipografia: Use apenas fontes modernas e legíveis, como `Enum.Font.GothamBold` (para títulos e botões) e `Enum.Font.Gotham` ou `Enum.Font.SourceSans` (para textos gerais). TextSize deve ser proporcional e equilibrado (títulos 20-24, botões 16-18, descrições 14).
+   - Profundidade: Adicione um UIStroke sutil (Thickness = 1, cor semi-transparente como Color3.fromRGB(60,60,65)) no MainFrame para destacar a janela do fundo do jogo.
+
+3. LÓGICA FUNCIONAL (SCRIPTING):
+   - O código deve incluir a funcionalidade básica da UI para que ela não seja apenas um enfeite.
+   - Faça o botão de fechar ("CloseButton") funcionar imediatamente escondendo o MainFrame (ex: `MainFrame.Visible = false`).
+   - Se o usuário pedir para comprar algo, estruture a lógica do botão de compra simulando ou disparando um RemoteEvent para o servidor (mesmo que seja um exemplo comentado de como conectar ao Server).
 
 Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
 {"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
 
 Siga boas praticas no codigo: use 'local', evite globais, use nomes claros em ingles para variaveis e PascalCase para servicos.
-Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.`;
+Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.
+
+// Altere o final do seu systemPrompt na Vercel para isso:
+
+Se o destino for "StarterGui", você NÃO vai gerar código Luau de criação. Em vez disso, o campo "code" deve conter uma string JSON que descreve a árvore de elementos que o plugin deve criar.
+
+O formato do JSON dentro do campo "code" deve ser exatamente assim (em formato de string/texto):
+"[{\\"ClassName\\":\\"ScreenGui\\",\\"Name\\":\\"ShopGui\\",\\"Properties\\":{\\"IgnoreGuiInset\\":true},\\"Children\\":[{\\"ClassName\\":\\"Frame\\",\\"Name\\":\\"MainFrame\\",\\"Properties\\":{\\"Size\\":\\"0.4,0,0.6,0\\",\\"Position\\":\\"0.5,0,0.5,0\\",\\"AnchorPoint\\":\\"0.5,0.5\\",\\"BackgroundColor3\\":\\"32,32,36\\"},\\"Children\\":[]}]}]"
+
+Responda SEMPRE no formato JSON padrão do backend:
+{"destination": "StarterGui", "code": "STRING_DO_JSON_DA_ESTRUTURA_AQUI"}`;
 
 	const userMessage = existingCode
 		? `Pedido do usuario: ${prompt}\n\nIMPORTANTE: ja existe um script anterior que precisa ser MODIFICADO (nao crie algo do zero, edite/expanda o que ja existe abaixo, mantendo o que ja funciona e aplicando a mudanca pedida):\n\n${existingCode}`
