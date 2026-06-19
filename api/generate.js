@@ -35,10 +35,22 @@ export default async function handler(req, res) {
 	}
 
 	const systemPrompt = `Voce e um especialista em Luau e na API do Roblox.
-Gere APENAS codigo Luau funcional, sem nenhuma explicacao, sem markdown, sem cercas de codigo (\`\`\`).
-Siga boas praticas: use 'local', evite globais, use nomes claros em ingles para variaveis e PascalCase para servicos.
-Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.
-Responda SOMENTE com o codigo, nada mais.`;
+Sua tarefa: gerar codigo Luau funcional E decidir onde esse codigo deve ser colocado na arvore do jogo.
+
+Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente como escrito):
+- "ServerScriptService" -> Script (servidor) que roda logica de jogo geral, NPCs, economia, drops, RemoteEvents do lado servidor, sistemas de loja, etc.
+- "StarterPlayerScripts" -> LocalScript que roda uma vez por jogador, nao depende do personagem existir (ex: UI geral, camera, input de menu).
+- "StarterCharacterScripts" -> LocalScript que precisa ser recriado a cada respawn do personagem (ex: scripts que mexem no Humanoid, animacoes, movimento, camera que segue o character, sistemas de vida/dano visual no character).
+- "Workspace" -> Script (servidor) que fica anexado a uma parte fisica do mapa (ex: parte que gira, porta automatica, plataforma).
+- "ReplicatedStorage" -> ModuleScript reutilizavel por varios scripts (ex: modulo de dados compartilhado, classe utilitaria) OU pasta de configuracao de RemoteEvents.
+
+Regra de ouro: se o pedido menciona "personagem", "character", "humanoid", "animacao do jogador", "vida do jogador", "movimento do jogador" -> use "StarterCharacterScripts".
+
+Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
+{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
+
+Siga boas praticas no codigo: use 'local', evite globais, use nomes claros em ingles para variaveis e PascalCase para servicos.
+Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.`;
 
 	try {
 		const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -63,16 +75,42 @@ Responda SOMENTE com o codigo, nada mais.`;
 		}
 
 		const data = await response.json();
-		let code = data.choices?.[0]?.message?.content || "";
+		let raw = data.choices?.[0]?.message?.content || "";
 
 		// Remove cercas de codigo se a IA mandar por engano
-		code = code.replace(/^```(?:lua|luau)?\s*/i, "").replace(/```\s*$/i, "").trim();
+		raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
+		let code = "";
+		let destination = "ServerScriptService"; // fallback seguro
+
+		try {
+			const parsed = JSON.parse(raw);
+			code = parsed.code || "";
+			if (parsed.destination) {
+				destination = parsed.destination;
+			}
+		} catch (parseErr) {
+			// A IA nao respondeu em JSON valido: usa o texto cru como codigo
+			// e mantem o destino padrao.
+			code = raw.replace(/^```(?:lua|luau)?\s*/i, "").replace(/```\s*$/i, "").trim();
+		}
+
+		const validDestinations = [
+			"ServerScriptService",
+			"StarterPlayerScripts",
+			"StarterCharacterScripts",
+			"Workspace",
+			"ReplicatedStorage",
+		];
+		if (!validDestinations.includes(destination)) {
+			destination = "ServerScriptService";
+		}
 
 		if (!code) {
 			return res.status(502).json({ error: "A IA nao retornou codigo. Resposta: " + JSON.stringify(data) });
 		}
 
-		return res.status(200).json({ code });
+		return res.status(200).json({ code, destination });
 	} catch (err) {
 		return res.status(500).json({ error: "Erro interno: " + err.message });
 	}
