@@ -4,7 +4,7 @@
 // Recebe: { prompt: "descricao do que o usuario quer", existingCode?: "codigo anterior se for edicao" }
 // Devolve UM dos dois formatos:
 //   - Para scripts normais: { kind: "script", code: "...luau...", destination: "ServerScriptService" }
-//   - Para GUI: { kind: "gui", guiTree: { ClassName, Name, Properties, Children }, destination: "StarterGui" }
+//   - Para GUI: { kind: "gui", guiTree: {...}, script: "...luau ou null...", destination: "StarterGui" }
 //
 // O guiTree e' uma arvore de Instances que o PLUGIN cria de verdade no Explorer
 // (em vez de pedir pra IA escrever um script que constroi a UI via codigo,
@@ -57,8 +57,19 @@ Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, EXATAMENTE 
     "Name": "NomeDaTela",
     "Properties": { "IgnoreGuiInset": true, "ResetOnSpawn": false },
     "Children": [ ... mais nodes no mesmo formato ... ]
-  }
+  },
+  "script": "CODIGO LUAU OPCIONAL AQUI, OU STRING VAZIA"
 }
+
+O campo "script" e OPCIONAL e so deve ser preenchido se o usuario pedir que a interface seja "funcional", "com codigo", "que funcione de verdade" ou descrever um COMPORTAMENTO (ex: "que abre/fecha", "que compra o item", "que atualiza o preco"). Se o pedido for SO sobre a aparencia visual, deixe "script": "".
+
+REGRAS DO CAMPO "script" (quando usado):
+- Esse codigo sera inserido como um LocalScript filho do ScreenGui raiz (ou seja, o codigo roda do lado do cliente, dentro da propria GUI).
+- Use SEMPRE "script.Parent" para referenciar o ScreenGui, e "script.Parent.NomeDoFilho.NomeDoNeto" (baseado EXATAMENTE nos "Name" que voce definiu no guiTree) pra pegar os elementos. Exemplo: se o guiTree tem ScreenGui > MainFrame > Header > CloseButton, o codigo acessa via "script.Parent.MainFrame.Header.CloseButton".
+- Use ":GetPropertyChangedSignal", ".MouseButton1Click:Connect(...)", tweens com TweenService, etc, conforme o comportamento pedido.
+- Para abrir/fechar paineis: alterne "Visible" ou anime "Size"/"Position" com TweenService.
+- Se precisar de dados do servidor (preco real, compra de item), crie/use RemoteEvents via ReplicatedStorage e mencione isso no codigo com comentarios, mas o foco do script aqui e o COMPORTAMENTO DE INTERFACE do lado cliente.
+- Use 'local', nomes em ingles, sem variaveis globais.
 
 Cada node tem: "ClassName" (Frame, TextLabel, TextButton, UICorner, UIListLayout, UIGridLayout, UIPadding, UIStroke, UIGradient, ScrollingFrame, ImageLabel, CanvasGroup),
 "Name" (PascalCase, descritivo), "Properties" (objeto chave-valor) e "Children" (array, pode ser vazio).
@@ -215,6 +226,7 @@ export default async function handler(req, res) {
 				kind: "gui",
 				destination: "StarterGui",
 				guiTree: parsed.guiTree,
+				script: typeof parsed.script === "string" && parsed.script.trim() ? parsed.script : null,
 			});
 		} else {
 			const validDestinations = [
