@@ -2,7 +2,6 @@
 //
 // Motor híbrido atualizado com extrator robusto de JSON para evitar quebras por texto conversacional.
 
-// Função auxiliar para extrair um objeto JSON válido de dentro de uma resposta em texto
 function extractJSON(text) {
 	// Remove marcações de bloco de código comuns que as IAs colocam por teimosia
 	let cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -51,7 +50,6 @@ export default async function handler(req, res) {
 	const geminiKey = process.env.GEMINI_API_KEY;
 	const groqKey = process.env.GROQ_API_KEY;
 
-	// 1. SE FOR PEDIDO DE GUI E A CHAVE DO GEMINI ESTIVER CONFIGURADA
 	if (isGuiRequest && geminiKey) {
 		const systemPrompt = `Você é uma UI/UX Designer Profissional de Roblox Studio. 
 Sua tarefa é criar interfaces de altíssimo nível visual, limpas e modernas.
@@ -115,7 +113,6 @@ Responda estritamente no formato JSON:
 		}
 	}
 
-	// 2. FALLBACK OU SCRIPTS GERAIS (Groq Llama 3.3)
 	if (!groqKey) {
 		return res.status(200).json({ 
 			error: "Nenhuma chave de API (GROQ) configurada no backend da Vercel.", 
@@ -125,7 +122,7 @@ Responda estritamente no formato JSON:
 
 	const systemPromptGroq = `Você é um programador Luau especialista em Roblox Studio.
 Sua tarefa é gerar código Luau limpo, otimizado e profissional de acordo com o pedido.
-Decida o destino com base nas regras: "ServerScriptService", "StarterPlayerScripts", "StarterCharacterScripts", "Workspace", "ReplicatedStorage".
+Decida o destino com base das regras: "ServerScriptService", "StarterPlayerScripts", "StarterCharacterScripts", "Workspace", "ReplicatedStorage".
 
 Responda OBRIGATORIAMENTE em JSON:
 {"destination": "NOME_DO_DESTINO", "code": "CÓDIGO_LUAU_AQUI"}`;
