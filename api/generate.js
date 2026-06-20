@@ -2,15 +2,16 @@
 //
 // Funcao serverless do Vercel.
 // Recebe: { prompt: "descricao do que o usuario quer", existingCode?: "codigo anterior se for edicao" }
-// Devolve UM dos dois formatos:
-//   - Para scripts normais: { kind: "script", code: "...luau...", destination: "ServerScriptService" }
-//   - Para GUI: { kind: "gui", guiTree: {...}, script: "...luau ou null...", destination: "StarterGui" }
+// Devolve UM dos tres formatos:
+//   - Script: { kind: "script", code: "...luau...", destination: "...", auxObjects: [...], templates: [...] }
+//   - GUI:    { kind: "gui", guiTree: {...}, script: "...luau ou null...", destination: "StarterGui" }
+//   - Build:  { kind: "build", buildTree: {...}, destination: "Workspace" }
 //
-// O guiTree e' uma arvore de Instances que o PLUGIN cria de verdade no Explorer
-// (em vez de pedir pra IA escrever um script que constroi a UI via codigo,
-// o que costuma sair feio e fragil).
+// guiTree/buildTree sao arvores de Instances que o PLUGIN cria de verdade no
+// Explorer/Workspace (em vez de pedir pra IA escrever um script que constroi
+// tudo via Instance.new(), o que costuma sair feio e fragil).
 //
-// Modelo: Gemini 3.5 Flash para tudo (scripts normais e GUI).
+// Modelo: Gemini 3.5 Flash para tudo (scripts, GUI e construcao 3D).
 //
 // Variavel de ambiente necessaria no Vercel:
 // - GEMINI_API_KEY (https://aistudio.google.com/app/apikey)
@@ -23,6 +24,17 @@ function isGuiRequest(text) {
 	];
 	const lower = text.toLowerCase();
 	return guiKeywords.some((kw) => lower.includes(kw));
+}
+
+function isBuildRequest(text) {
+	const buildKeywords = [
+		"constru", "monte", "monta", "criar uma casa", "crie uma casa",
+		"predio", "prédio", "castelo", "mapa", "cenario", "cenário",
+		"plataforma", "terreno", "estrutura", "torre", "ponte",
+		"arena", "labirinto", "ilha", "build ", "faça um mapa",
+	];
+	const lower = text.toLowerCase();
+	return buildKeywords.some((kw) => lower.includes(kw));
 }
 
 const SCRIPT_SYSTEM_PROMPT = `Voce e um especialista em Luau e na API do Roblox.
@@ -55,6 +67,47 @@ Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato 
 {"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha", "auxObjects": [{"ClassName": "RemoteEvent", "Name": "NomeDoEvento", "Parent": "ReplicatedStorage"}], "templates": [{"Name": "NomeDoTemplate", "tree": { "ClassName": "BillboardGui", "Name": "NomeDoTemplate", "Properties": {}, "Children": [] }}]}
 
 Siga boas praticas: use 'local', evite globais, nomes claros em ingles, PascalCase para servicos.`;
+
+const BUILD_SYSTEM_PROMPT = `Voce e um construtor 3D especialista em Roblox Studio, equivalente a um level designer que constroi estruturas usando Parts e Models.
+Sua tarefa: gerar uma ARVORE DE INSTANCES 3D (Model/Part/UnionOperation/etc) que representa a construcao pedida, pronta pra ser criada de verdade no Workspace.
+
+Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, EXATAMENTE neste formato:
+{
+  "destination": "Workspace",
+  "buildTree": {
+    "ClassName": "Model",
+    "Name": "NomeDaConstrucao",
+    "Properties": {},
+    "Children": [ ... Parts e sub-models no mesmo formato ... ]
+  }
+}
+
+Cada node tem: "ClassName" (use principalmente "Part" pra blocos, "Model" pra agrupar partes relacionadas, "WedgePart" pra rampas/telhados triangulares),
+"Name" (PascalCase, descritivo, ex: "Parede_Frente", "Telhado", "Porta", "Pilar1"), "Properties" e "Children".
+
+Tipos especiais de valor (decodificados pelo plugin):
+- Vector3 (posicao/tamanho, em studs): {"__type":"Vector3","v":[x,y,z]}
+- Color3 (RGB 0-255): {"__type":"Color3","v":[r,g,b]}
+- Enum: {"__type":"Enum","v":"Material.Wood"} (ou "Material.Brick", "Material.Concrete", "Material.Glass", "PartType.Cylinder", etc)
+
+PROPRIEDADES ESSENCIAIS DE TODO "Part" (sempre defina):
+- "Size": Vector3 com as dimensoes em studs (ex: [10,1,10] pra um piso fino e largo).
+- "Position": Vector3 com a posicao no mundo. IMPORTANTE: planeje as posicoes RELATIVAS ENTRE SI pra as pecas se encaixarem corretamente (ex: paredes nas bordas do piso, telhado acima das paredes, porta no meio de uma parede). Calcule as coordenadas com cuidado, baseado no Size de cada peca.
+- "Anchored": true (SEMPRE true, senao a construcao cai com a gravidade).
+- "Material": Enum "Material.XXX" (escolha um material coerente com o pedido: madeira="Material.Wood", pedra="Material.Concrete" ou "Material.Slate", metal="Material.Metal" ou "Material.DiamondPlate", vidro="Material.Glass", tijolo="Material.Brick", grama="Material.Grass").
+- "Color": Color3 coerente com o material/tema (ex: madeira tons de marrom [120,80,50], pedra tons de cinza [140,140,140], grama verde [90,140,60]).
+- "BrickColor" NAO deve ser usado, use sempre "Color" (Color3).
+- "TopSurface" e "BottomSurface": Enum "SurfaceType.Smooth" (evita unioes visuais estranhas entre pecas).
+
+REGRAS DE CONSTRUCAO:
+1. Sempre comece com um "Model" raiz contendo todas as partes, com um nome descritivo.
+2. Pense na estrutura como um arquiteto: fundacao/piso primeiro, depois paredes, depois teto/telhado, depois detalhes (portas, janelas, decoracoes).
+3. Para casas/predios: defina um Size de planta baixa (ex: piso 20x1x16), depois paredes de altura proporcional (ex: 1x8x16 ou 20x8x1 dependendo da orientacao), encaixando nas bordas do piso usando a matematica de Position corretamente (centro do piso +/- metade da largura).
+4. Use WedgePart pra telhados inclinados quando fizer sentido, ou Parts normais empilhadas formando um teto simples se for mais facil de calcular.
+5. Adicione pelo menos um nivel de detalhe (janelas como Parts mais escuras/com Material Glass, porta como Part de cor diferente) pra nao ficar uma caixa generica.
+6. Para estruturas grandes (mapas, arenas), pode usar mais Parts repetidas em padrao (ex: arquibancada com Parts em escada), mas mantenha o JSON razoavel em tamanho (max ~40-60 parts).
+7. Nao use fisica complexa, juntas ou scripts aqui — essa tarefa e SOMENTE sobre geometria estatica (Anchored true).
+8. Posicione a construcao com a base proxima de Y=0 a Y=5 (nivel do chao), a menos que o pedido peca algo flutuante/elevado.`;
 
 const GUI_SYSTEM_PROMPT = `Voce e um designer de UI/UX senior especializado em jogos Roblox modernos (estilo dos top jogos de 2025-2026: bem produzidos, limpos, com hierarquia visual clara).
 Sua tarefa: gerar uma ARVORE DE INSTANCES (nao um script!) que representa a interface pedida, pronta pra ser criada de verdade no Explorer do Roblox Studio.
@@ -153,6 +206,7 @@ export default async function handler(req, res) {
 	}
 
 	const isGui = isGuiRequest(prompt);
+	const isBuild = !isGui && isBuildRequest(prompt);
 
 	const geminiKey = process.env.GEMINI_API_KEY;
 
@@ -160,7 +214,7 @@ export default async function handler(req, res) {
 		return res.status(500).json({ error: "GEMINI_API_KEY nao configurada no servidor." });
 	}
 
-	const systemPrompt = isGui ? GUI_SYSTEM_PROMPT : SCRIPT_SYSTEM_PROMPT;
+	const systemPrompt = isGui ? GUI_SYSTEM_PROMPT : (isBuild ? BUILD_SYSTEM_PROMPT : SCRIPT_SYSTEM_PROMPT);
 
 	const userMessage = existingCode
 		? `Pedido do usuario: ${prompt}\n\nIMPORTANTE: ja existe algo anterior que precisa ser MODIFICADO (nao crie do zero, edite/expanda o que ja existe abaixo, aplicando a mudanca pedida):\n\n${existingCode}`
@@ -205,6 +259,15 @@ export default async function handler(req, res) {
 				destination: "StarterGui",
 				guiTree: parsed.guiTree,
 				script: typeof parsed.script === "string" && parsed.script.trim() ? parsed.script : null,
+			});
+		} else if (isBuild) {
+			if (!parsed.buildTree) {
+				return res.status(502).json({ error: "A IA nao retornou buildTree. Resposta cru: " + rawContent });
+			}
+			return res.status(200).json({
+				kind: "build",
+				destination: "Workspace",
+				buildTree: parsed.buildTree,
 			});
 		} else {
 			const validDestinations = [
