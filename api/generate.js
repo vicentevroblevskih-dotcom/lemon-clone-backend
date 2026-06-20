@@ -1,16 +1,9 @@
 // api/generate.js
 //
-// Funcao serverless do Vercel.
-// Recebe: { prompt: "descricao do que o usuario quer" }
-// Devolve: { code: "codigo luau gerado" }
-//
-// Usa a API da Groq (tem modelos gratuitos/baratos e rapidos).
-// Precisa configurar a variavel de ambiente GROQ_API_KEY no Vercel
-// (Project Settings > Environment Variables).
-// Pegue a chave de graca em: https://console.groq.com/keys
+// Motor híbrido: Usa Gemini 2.0 Flash (via GEMINI_API_KEY) para criar as interfaces (JSON)
+// e Groq Llama 3.3 (via GROQ_API_KEY) para gerar os scripts normais (Luau).
 
 export default async function handler(req, res) {
-	// Permitir requests vindos do plugin do Roblox Studio
 	res.setHeader("Access-Control-Allow-Origin", "*");
 	res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -20,98 +13,135 @@ export default async function handler(req, res) {
 	}
 
 	if (req.method !== "POST") {
-		return res.status(405).json({ error: "Use POST." });
+		return res.status(405).json({ error: "Utilize POST." });
 	}
 
-	const { prompt } = req.body || {};
+	const { prompt, existingCode } = req.body || {};
 
 	if (!prompt || typeof prompt !== "string") {
-		return res.status(400).json({ error: "Campo 'prompt' obrigatorio." });
+		return res.status(400).json({ error: "Campo 'prompt' obrigatório." });
 	}
 
-	const apiKey = process.env.GROQ_API_KEY;
-	if (!apiKey) {
-		return res.status(500).json({ error: "GROQ_API_KEY nao configurada no servidor." });
+	// Identificar para onde enviar com base no pedido de interface
+	const isGuiRequest = prompt.toLowerCase().includes("gui") || 
+	                     prompt.toLowerCase().includes("tela") || 
+	                     prompt.toLowerCase().includes("loja") || 
+	                     prompt.toLowerCase().includes("hud") || 
+	                     prompt.toLowerCase().includes("menu") || 
+	                     prompt.toLowerCase().includes("button") || 
+	                     prompt.toLowerCase().includes("botao");
+
+	const geminiKey = process.env.GEMINI_API_KEY;
+	const groqKey = process.env.GROQ_API_KEY;
+
+	// Se for GUI e tiver a chave do Gemini, vamos usar o Gemini 2.0 Flash!
+	if (isGuiRequest && geminiKey) {
+		const systemPrompt = `Você é uma UI/UX Designer Profissional de Roblox Studio. 
+Sua tarefa é criar interfaces de altíssimo nível visual, limpas e modernas.
+Como o destino é "StarterGui", você NÃO vai gerar código Luau. O campo "code" deve conter obrigatoriamente um array JSON estruturado com a árvore de elementos físicos a serem criados.
+
+Use sempre UICorner (cantos arredondados entre 0,8 e 0,12), UIGradient (para dar profundidade nos frames e botões) e UIPadding (para margens internas).
+Use cores modernas escuras (como "32,32,36") e cores de destaque vibrantes (como azul "0,162,255" ou amarelo "255,221,87").
+
+Formato OBRIGATÓRIO do campo "code" (string do array JSON de objetos):
+"[{\\"ClassName\\":\\"ScreenGui\\",\\"Name\\":\\"ShopGui\\",\\"Properties\\":{\\"IgnoreGuiInset\\":true},\\"Children\\":[{\\"ClassName\\":\\"Frame\\",\\"Name\\":\\"MainFrame\\",\\"Properties\\":{\\"Size\\":\\"0.4,0,0.6,0\\",\\"Position\\":\\"0.5,0,0.5,0\\",\\"AnchorPoint\\":\\"0.5,0.5\\",\\"BackgroundColor3\\":\\"32,32,36\\"},\\"Children\\":[{\\"ClassName\\":\\"UICorner\\",\\"Name\\":\\"FrameCorner\\",\\"Properties\\":{\\"CornerRadius\\":\\"0,10\\"}}]}]}]"
+
+Responda estritamente no formato JSON:
+{
+  "destination": "StarterGui",
+  "code": "STRING_DO_ARRAY_JSON_DE_INSTANCIAS_AQUI"
+}`;
+
+		try {
+			const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json"
+				},
+				body: JSON.stringify({
+					contents: [{
+						parts: [{ text: `Pedido do usuário: ${prompt}\n\nCódigo anterior opcional: ${existingCode || ""}` }]
+					}],
+					systemInstruction: {
+						parts: [{ text: systemPrompt }]
+					},
+					generationConfig: {
+						responseMimeType: "application/json",
+						temperature: 0.2
+					}
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error(await response.text());
+			}
+
+			const data = await response.json();
+			const textResult = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+			const parsedResult = JSON.parse(textResult);
+
+			return res.status(200).json({
+				code: parsedResult.code || "",
+				destination: "StarterGui",
+				model: "Gemini 2.0 Flash"
+			});
+		} catch (err) {
+			// Se o Gemini falhar por algum motivo, deixa cair no fallback do Groq abaixo
+			console.error("Falha no Gemini, tentando Groq:", err.message);
+		}
 	}
 
-	const systemPrompt = `Voce e um especialista em Luau e na API do Roblox.
-Sua tarefa: gerar codigo Luau funcional E decidir onde esse codigo deve ser colocado na arvore do jogo.
+	// FALLBACK OU SCRIPTS GERAIS (Groq Llama 3.3)
+	if (!groqKey) {
+		return res.status(200).json({ 
+			error: "Nenhuma chave de API configurada no backend (Vercel).", 
+			destination: "ServerScriptService" 
+		});
+	}
 
-Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente como escrito):
-- "ServerScriptService" -> Script (servidor) que roda logica de jogo geral, NPCs, economia, drops, RemoteEvents do lado servidor, sistemas de loja, etc.
-- "StarterPlayerScripts" -> LocalScript que roda uma vez por jogador, nao depende do personagem existir (ex: UI geral, camera, input de menu).
-- "StarterCharacterScripts" -> LocalScript que precisa ser recriado a cada respawn do personagem (ex: scripts que mexem no Humanoid, animacoes, movimento, camera que segue o character, sistemas de vida/dano visual no character).
-- "Workspace" -> Script (servidor) que fica anexado a uma parte fisica do mapa (ex: parte que gira, porta automatica, plataforma).
-- "ReplicatedStorage" -> ModuleScript reutilizavel por varios scripts (ex: modulo de dados compartilhado, classe utilitaria) OU pasta de configuracao de RemoteEvents.
+	const systemPromptGroq = `Você é um programador Luau especialista em Roblox Studio.
+Sua tarefa é gerar código Luau limpo, otimizado e profissional de acordo com o pedido.
+Decida o destino com base nas regras: "ServerScriptService", "StarterPlayerScripts", "StarterCharacterScripts", "Workspace", "ReplicatedStorage".
 
-Regra de ouro: se o pedido menciona "personagem", "character", "humanoid", "animacao do jogador", "vida do jogador", "movimento do jogador" -> use "StarterCharacterScripts".
-
-Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
-{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
-
-Siga boas praticas no codigo: use 'local', evite globais, use nomes claros em ingles para variaveis e PascalCase para servicos.
-Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.`;
+Responda OBRIGATORIAMENTE em JSON:
+{"destination": "NOME_DO_DESTINO", "code": "CÓDIGO_LUAU_AQUI"}`;
 
 	try {
 		const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				"Authorization": `Bearer ${apiKey}`,
+				"Authorization": `Bearer ${groqKey}`
 			},
 			body: JSON.stringify({
 				model: "llama-3.3-70b-versatile",
 				messages: [
-					{ role: "system", content: systemPrompt },
-					{ role: "user", content: prompt },
+					{ role: "system", content: systemPromptGroq },
+					{ role: "user", content: prompt }
 				],
-				max_tokens: 2000,
-			}),
+				max_tokens: 2000
+			})
 		});
 
 		if (!response.ok) {
 			const errText = await response.text();
-			return res.status(502).json({ error: "Erro na API da IA: " + errText });
+			return res.status(200).json({ error: "Erro na Groq: " + errText, destination: "ServerScriptService" });
 		}
 
 		const data = await response.json();
 		let raw = data.choices?.[0]?.message?.content || "";
-
-		// Remove cercas de codigo se a IA mandar por engano
 		raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
 
-		let code = "";
-		let destination = "ServerScriptService"; // fallback seguro
-
-		try {
-			const parsed = JSON.parse(raw);
-			code = parsed.code || "";
-			if (parsed.destination) {
-				destination = parsed.destination;
-			}
-		} catch (parseErr) {
-			// A IA nao respondeu em JSON valido: usa o texto cru como codigo
-			// e mantem o destino padrao.
-			code = raw.replace(/^```(?:lua|luau)?\s*/i, "").replace(/```\s*$/i, "").trim();
-		}
-
-		const validDestinations = [
-			"ServerScriptService",
-			"StarterPlayerScripts",
-			"StarterCharacterScripts",
-			"Workspace",
-			"ReplicatedStorage",
-		];
-		if (!validDestinations.includes(destination)) {
-			destination = "ServerScriptService";
-		}
-
-		if (!code) {
-			return res.status(502).json({ error: "A IA nao retornou codigo. Resposta: " + JSON.stringify(data) });
-		}
-
-		return res.status(200).json({ code, destination });
+		const parsed = JSON.parse(raw);
+		return res.status(200).json({
+			code: parsed.code || "",
+			destination: parsed.destination || "ServerScriptService",
+			model: "Llama 3.3 (Groq)"
+		});
 	} catch (err) {
-		return res.status(500).json({ error: "Erro interno: " + err.message });
+		return res.status(200).json({ 
+			error: "Erro crítico de processamento: " + err.message, 
+			destination: "ServerScriptService" 
+		});
 	}
 }
