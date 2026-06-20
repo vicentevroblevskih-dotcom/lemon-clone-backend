@@ -2,7 +2,13 @@
 //
 // Funcao serverless do Vercel.
 // Recebe: { prompt: "descricao do que o usuario quer", existingCode?: "codigo anterior se for edicao" }
-// Devolve: { code: "codigo luau gerado", destination: "..." }
+// Devolve UM dos dois formatos:
+//   - Para scripts normais: { kind: "script", code: "...luau...", destination: "ServerScriptService" }
+//   - Para GUI: { kind: "gui", guiTree: { ClassName, Name, Properties, Children }, destination: "StarterGui" }
+//
+// O guiTree e' uma arvore de Instances que o PLUGIN cria de verdade no Explorer
+// (em vez de pedir pra IA escrever um script que constroi a UI via codigo,
+// o que costuma sair feio e fragil).
 //
 // Roteamento de modelo:
 // - Pedidos de GUI/UI/interface -> Gemini 3.5 Flash (melhor pra design visual)
@@ -22,8 +28,62 @@ function isGuiRequest(text) {
 	return guiKeywords.some((kw) => lower.includes(kw));
 }
 
+const SCRIPT_SYSTEM_PROMPT = `Voce e um especialista em Luau e na API do Roblox.
+Sua tarefa: gerar codigo Luau funcional E decidir onde esse codigo deve ser colocado na arvore do jogo.
+
+Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente como escrito):
+- "ServerScriptService" -> Script (servidor) que roda logica de jogo geral, NPCs, economia, drops, RemoteEvents do lado servidor, sistemas de loja, etc.
+- "StarterPlayerScripts" -> LocalScript que roda uma vez por jogador, nao depende do personagem existir.
+- "StarterCharacterScripts" -> LocalScript que precisa ser recriado a cada respawn do personagem (mexe no Humanoid, animacoes, movimento, camera que segue o character).
+- "Workspace" -> Script (servidor) anexado a uma parte fisica do mapa (parte que gira, porta automatica, plataforma).
+- "ReplicatedStorage" -> ModuleScript reutilizavel ou pasta de configuracao de RemoteEvents.
+
+Regra de ouro: se mencionar "personagem", "character", "humanoid", "animacao do jogador" -> "StarterCharacterScripts".
+
+Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
+{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
+
+Siga boas praticas: use 'local', evite globais, nomes claros em ingles, PascalCase para servicos.
+Se envolver RemoteEvents, crie-os dentro de ReplicatedStorage quando necessario.`;
+
+const GUI_SYSTEM_PROMPT = `Voce e um especialista em design de interfaces (UI/UX) para jogos Roblox.
+Sua tarefa: gerar uma ARVORE DE INSTANCES (nao um script!) que representa a interface pedida, pronta pra ser criada de verdade no Explorer do Roblox Studio.
+
+Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, EXATAMENTE neste formato:
+{
+  "destination": "StarterGui",
+  "guiTree": {
+    "ClassName": "ScreenGui",
+    "Name": "NomeDaTela",
+    "Properties": { "IgnoreGuiInset": true, "ResetOnSpawn": false },
+    "Children": [ ... mais nodes no mesmo formato ... ]
+  }
+}
+
+Cada node tem: "ClassName" (ex: Frame, TextLabel, TextButton, UICorner, UIListLayout, UIPadding, UIStroke, ScrollingFrame, ImageLabel, UIGridLayout),
+"Name" (string, PascalCase, descritivo), "Properties" (objeto chave-valor) e "Children" (array, pode ser vazio).
+
+Para valores de propriedade que NAO sao numero/string/bool simples, use estes formatos especiais (eles serao decodificados pelo plugin):
+- UDim2: {"__type":"UDim2","v":[xScale,xOffset,yScale,yOffset]}
+- UDim: {"__type":"UDim","v":[scale,offset]}
+- Color3 (RGB 0-255): {"__type":"Color3","v":[r,g,b]}
+- Vector2: {"__type":"Vector2","v":[x,y]}
+- Enum: {"__type":"Enum","v":"Font.GothamBold"}  (ou "TextXAlignment.Center", etc)
+
+REGRAS DE DESIGN (obrigatorias, interfaces malfeitas sao o erro mais comum, evite a todo custo):
+- ScreenGui: IgnoreGuiInset=true, ResetOnSpawn=false.
+- O Frame principal deve ter Size em UDim2 por Scale (ex: [0.5,0,0.6,0]), AnchorPoint Vector2 [0.5,0.5] e Position UDim2 [0.5,0,0.5,0] pra ficar centralizado.
+- TODO Frame e botao precisa ter um filho UICorner com Properties {"CornerRadius": {"__type":"UDim","v":[0,12]}}.
+- Paleta moderna: fundo escuro Color3 [24,24,28] ou [30,30,36], cor de destaque vibrante (amarelo [255,221,87], azul [88,166,255] ou verde [88,255,150]), texto branco/cinza claro [235,235,235].
+- Containers com mais de 1 filho visual devem ter um UIListLayout ou UIGridLayout como filho, com Padding (UDim [0,8] a [0,12]) e definir SortOrder como Enum LayoutOrder.
+- Use UIPadding como filho de containers pra dar respiro interno (8 a 16px = UDim [0,8] a [0,16] em cada lado: PaddingTop/Bottom/Left/Right).
+- Botoes: BackgroundColor3 = cor de destaque, TextColor3 = contrastante, Font = Enum "Font.GothamBold", TextSize 16-22.
+- Titulos (TextLabel no topo): Font "Font.GothamBold", TextSize 20-28.
+- Adicione UIStroke (Thickness 1-2, Color semi-claro) no Frame principal pra dar profundidade, quando fizer sentido.
+- Texto sempre com BackgroundTransparency 1 quando for so texto.
+- Nomeie tudo de forma clara: "MainFrame", "TitleLabel", "CloseButton", "ItemList", etc.`;
+
 export default async function handler(req, res) {
-	// Permitir requests vindos do plugin do Roblox Studio
 	res.setHeader("Access-Control-Allow-Origin", "*");
 	res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -31,7 +91,6 @@ export default async function handler(req, res) {
 	if (req.method === "OPTIONS") {
 		return res.status(200).end();
 	}
-
 	if (req.method !== "POST") {
 		return res.status(405).json({ error: "Use POST." });
 	}
@@ -54,40 +113,10 @@ export default async function handler(req, res) {
 		return res.status(500).json({ error: "GROQ_API_KEY nao configurada no servidor." });
 	}
 
-	const systemPrompt = `Voce e um especialista em Luau, na API do Roblox e em design de interfaces (UI/UX) para jogos.
-Sua tarefa: gerar codigo Luau funcional E decidir onde esse codigo deve ser colocado na arvore do jogo.
-
-Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente como escrito):
-- "ServerScriptService" -> Script (servidor) que roda logica de jogo geral, NPCs, economia, drops, RemoteEvents do lado servidor, sistemas de loja, etc.
-- "StarterPlayerScripts" -> LocalScript que roda uma vez por jogador, nao depende do personagem existir (ex: input de menu, sistemas gerais do lado cliente).
-- "StarterCharacterScripts" -> LocalScript que precisa ser recriado a cada respawn do personagem (ex: scripts que mexem no Humanoid, animacoes, movimento, camera que segue o character, sistemas de vida/dano visual no character).
-- "Workspace" -> Script (servidor) que fica anexado a uma parte fisica do mapa (ex: parte que gira, porta automatica, plataforma).
-- "ReplicatedStorage" -> ModuleScript reutilizavel por varios scripts (ex: modulo de dados compartilhado, classe utilitaria) OU pasta de configuracao de RemoteEvents.
-- "StarterGui" -> LocalScript que CRIA UMA INTERFACE GRAFICA (GUI/UI/tela/menu/HUD/inventario/loja visual). Use esta opcao sempre que o pedido for sobre uma tela, botao, painel, HUD, menu ou qualquer elemento visual de interface.
-
-Regra de ouro: se o pedido menciona "personagem", "character", "humanoid", "animacao do jogador" -> "StarterCharacterScripts". Se mencionar "interface", "GUI", "UI", "tela", "menu", "HUD", "botao", "painel", "inventario visual", "loja visual" -> "StarterGui".
-
-QUANDO O DESTINO FOR "StarterGui", siga rigorosamente estas regras de design (interfaces malfeitas sao o erro mais comum, evite a todo custo):
-- Crie um ScreenGui com IgnoreGuiInset = true e ResetOnSpawn = false.
-- Use Size em Scale (UDim2.fromScale) para os elementos principais, nunca pixels fixos grandes; use Offset apenas para detalhes pequenos (padding, icones).
-- TODO Frame/botao deve ter um UICorner (CornerRadius entre 8 e 16 px) para cantos arredondados; nunca deixe cantos quadrados crus.
-- Use uma paleta de cor coesa e moderna: fundo escuro (ex: Color3.fromRGB(24,24,28) ou Color3.fromRGB(30,30,36)), uma cor de destaque vibrante (ex: amarelo, azul ou verde), texto branco ou cinza claro (Color3.fromRGB(235,235,235)).
-- Use UIListLayout ou UIGridLayout com Padding definido (UDim.new(0,8) a UDim.new(0,12)) para organizar elementos, em vez de posicionar tudo manualmente com Position.
-- Use UIPadding em containers para dar respiro interno (8 a 16px).
-- Botoes devem ter BackgroundColor3 com cor de destaque, TextColor3 contrastante, Font = Enum.Font.GothamBold ou Enum.Font.SourceSansBold, TextSize entre 16 e 22.
-- Use AnchorPoint = Vector2.new(0.5, 0.5) e Position em Scale 0.5,0.5 para centralizar janelas/paineis na tela.
-- Adicione UIStroke sutil (Thickness 1-2, cor semi-transparente) em paineis principais para profundidade, quando fizer sentido.
-- Nomeie as instancias de forma clara (ex: "MainFrame", "TitleLabel", "CloseButton").
-- Sempre parent o ScreenGui em "script.Parent" (pois o LocalScript estara dentro do StarterGui, e o jogo clona automaticamente pro PlayerGui).
-
-Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
-{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
-
-Siga boas praticas no codigo: use 'local', evite globais, use nomes claros em ingles para variaveis e PascalCase para servicos.
-Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStorage quando necessario.`;
+	const systemPrompt = useGemini ? GUI_SYSTEM_PROMPT : SCRIPT_SYSTEM_PROMPT;
 
 	const userMessage = existingCode
-		? `Pedido do usuario: ${prompt}\n\nIMPORTANTE: ja existe um script anterior que precisa ser MODIFICADO (nao crie algo do zero, edite/expanda o que ja existe abaixo, mantendo o que ja funciona e aplicando a mudanca pedida):\n\n${existingCode}`
+		? `Pedido do usuario: ${prompt}\n\nIMPORTANTE: ja existe algo anterior que precisa ser MODIFICADO (nao crie do zero, edite/expanda o que ja existe abaixo, aplicando a mudanca pedida):\n\n${existingCode}`
 		: prompt;
 
 	try {
@@ -126,7 +155,7 @@ Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStor
 						{ role: "system", content: systemPrompt },
 						{ role: "user", content: userMessage },
 					],
-					max_tokens: 2000,
+					max_tokens: 3000,
 				}),
 			});
 
@@ -139,41 +168,46 @@ Se o pedido envolver RemoteEvents, crie-os corretamente dentro de ReplicatedStor
 			rawContent = data.choices?.[0]?.message?.content || "";
 		}
 
-		// Remove cercas de codigo se a IA mandar por engano
-		let raw = rawContent.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+		const raw = rawContent.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
 
-		let code = "";
-		let destination = "ServerScriptService"; // fallback seguro
-
+		let parsed;
 		try {
-			const parsed = JSON.parse(raw);
-			code = parsed.code || "";
-			if (parsed.destination) {
-				destination = parsed.destination;
-			}
+			parsed = JSON.parse(raw);
 		} catch (parseErr) {
-			// A IA nao respondeu em JSON valido: usa o texto cru como codigo
-			// e mantem o destino padrao.
-			code = raw.replace(/^```(?:lua|luau)?\s*/i, "").replace(/```\s*$/i, "").trim();
+			return res.status(502).json({ error: "A IA nao respondeu em JSON valido. Resposta cru: " + rawContent });
 		}
 
-		const validDestinations = [
-			"ServerScriptService",
-			"StarterPlayerScripts",
-			"StarterCharacterScripts",
-			"Workspace",
-			"ReplicatedStorage",
-			"StarterGui",
-		];
-		if (!validDestinations.includes(destination)) {
-			destination = "ServerScriptService";
-		}
+		if (useGemini) {
+			if (!parsed.guiTree) {
+				return res.status(502).json({ error: "A IA nao retornou guiTree. Resposta cru: " + rawContent });
+			}
+			return res.status(200).json({
+				kind: "gui",
+				destination: "StarterGui",
+				guiTree: parsed.guiTree,
+			});
+		} else {
+			const validDestinations = [
+				"ServerScriptService",
+				"StarterPlayerScripts",
+				"StarterCharacterScripts",
+				"Workspace",
+				"ReplicatedStorage",
+			];
+			let destination = validDestinations.includes(parsed.destination)
+				? parsed.destination
+				: "ServerScriptService";
 
-		if (!code) {
-			return res.status(502).json({ error: "A IA nao retornou codigo. Resposta cru: " + rawContent });
-		}
+			if (!parsed.code) {
+				return res.status(502).json({ error: "A IA nao retornou codigo. Resposta cru: " + rawContent });
+			}
 
-		return res.status(200).json({ code, destination });
+			return res.status(200).json({
+				kind: "script",
+				destination,
+				code: parsed.code,
+			});
+		}
 	} catch (err) {
 		return res.status(500).json({ error: "Erro interno: " + err.message });
 	}
