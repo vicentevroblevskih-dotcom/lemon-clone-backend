@@ -1,8 +1,24 @@
 // api/generate.js
 //
-// Motor híbrido atualizado para 2026: 
-// Usa Gemini 3.5 Flash (via GEMINI_API_KEY) para criar as interfaces (JSON)
-// e Groq Llama 3.3 (via GROQ_API_KEY) para gerar os scripts normais (Luau).
+// Motor híbrido atualizado com extrator robusto de JSON para evitar quebras por texto conversacional.
+
+// Função auxiliar para extrair um objeto JSON válido de dentro de uma resposta em texto
+function extractJSON(text) {
+	// Remove marcações de bloco de código comuns que as IAs colocam por teimosia
+	let cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+	
+	// Localiza o primeiro '{' e o último '}'
+	const firstBrace = cleaned.indexOf('{');
+	const lastBrace = cleaned.lastIndexOf('}');
+	
+	if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+		const jsonString = cleaned.substring(firstBrace, lastBrace + 1);
+		return JSON.parse(jsonString);
+	}
+	
+	// Se falhar, tenta dar parse direto no texto limpo
+	return JSON.parse(cleaned);
+}
 
 export default async function handler(req, res) {
 	res.setHeader("Access-Control-Allow-Origin", "*");
@@ -35,17 +51,17 @@ export default async function handler(req, res) {
 	const geminiKey = process.env.GEMINI_API_KEY;
 	const groqKey = process.env.GROQ_API_KEY;
 
-	// Se for pedido de GUI e a chave do Gemini estiver configurada
+	// 1. SE FOR PEDIDO DE GUI E A CHAVE DO GEMINI ESTIVER CONFIGURADA
 	if (isGuiRequest && geminiKey) {
 		const systemPrompt = `Você é uma UI/UX Designer Profissional de Roblox Studio. 
 Sua tarefa é criar interfaces de altíssimo nível visual, limpas e modernas.
 Como o destino é "StarterGui", você NÃO vai gerar código Luau. O campo "code" deve conter obrigatoriamente um array JSON estruturado com a árvore de elementos físicos a serem criados.
 
-Use sempre UICorner (cantos arredondados entre 0,8 e 0,12), UIGradient (para dar profundidade nos frames e botões) e UIPadding (para margens internas).
+Use sempre UICorner (cantos arredondados entre 0.8 e 0.12), UIGradient (para dar profundidade nos frames e botões) e UIPadding (para margens internas).
 Use cores modernas escuras (como "32,32,36") e cores de destaque vibrantes (como azul "0,162,255" ou amarelo "255,221,87").
 
 Formato OBRIGATÓRIO do campo "code" (string do array JSON de objetos):
-"[{\"ClassName\":\"ScreenGui\",\"Name\":\"ShopGui\",\"Properties\":{\"IgnoreGuiInset\":true},\"Children\":[{\"ClassName\":\"Frame\",\"Name\":\"MainFrame\",\"Properties\":{\"Size\":\"0.4,0,0.6,0\",\"Position\":\"0.5,0,0.5,0\",\"AnchorPoint\":\"0.5,0.5\",\"BackgroundColor3\":\"32,32,36\"},\"Children\":[{\"ClassName\":\"UICorner\",\"Name\":\"FrameCorner\",\"Properties\":{\"CornerRadius\":\"0,10\"}}]}]}]"
+"[{\\"ClassName\\":\\"ScreenGui\\",\\"Name\\":\\"ShopGui\\",\\"Properties\\":{\\"IgnoreGuiInset\\":true},\\"Children\\":[{\\"ClassName\\":\\"Frame\\",\\"Name\\":\\"MainFrame\\",\\"Properties\\":{\\"Size\\":\\"0.4,0,0.6,0\\",\\"Position\\":\\"0.5,0,0.5,0\\",\\"AnchorPoint\\":\\"0.5,0.5\\",\\"BackgroundColor3\\":\\"32,32,36\\"},\\"Children\\":[{\\"ClassName\\":\\"UICorner\\",\\"Name\\":\\"FrameCorner\\",\\"Properties\\":{\\"CornerRadius\\":\\"0,10\\"}}]}]}]"
 
 Responda estritamente no formato JSON:
 {
@@ -54,7 +70,6 @@ Responda estritamente no formato JSON:
 }`;
 
 		try {
-			// Atualizado para o modelo ativo: gemini-3.5-flash
 			const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
 				method: "POST",
 				headers: {
@@ -81,7 +96,9 @@ Responda estritamente no formato JSON:
 
 			const data = await response.json();
 			const textResult = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-			const parsedResult = JSON.parse(textResult);
+			
+			// Processamento robusto do JSON
+			const parsedResult = extractJSON(textResult);
 
 			return res.status(200).json({
 				code: parsedResult.code || "",
@@ -89,19 +106,19 @@ Responda estritamente no formato JSON:
 				model: "Gemini 3.5 Flash"
 			});
 		} catch (err) {
-			// Em vez de fallback silencioso, retorna o erro exato do Gemini para depuração
+			// Fallback ou repasse amigável do erro
 			return res.status(200).json({
-				error: "Falha na API do Gemini 3.5: " + err.message,
+				error: "Falha na chamada ao Gemini 3.5: " + err.message,
 				destination: "StarterGui",
 				model: "Gemini 3.5 Flash (Erro)"
 			});
 		}
 	}
 
-	// FALLBACK OU SCRIPTS GERAIS (Groq Llama 3.3)
+	// 2. FALLBACK OU SCRIPTS GERAIS (Groq Llama 3.3)
 	if (!groqKey) {
 		return res.status(200).json({ 
-			error: "Nenhuma chave de API (GROQ) configurada no backend.", 
+			error: "Nenhuma chave de API (GROQ) configurada no backend da Vercel.", 
 			destination: "ServerScriptService" 
 		});
 	}
@@ -136,10 +153,11 @@ Responda OBRIGATORIAMENTE em JSON:
 		}
 
 		const data = await response.json();
-		let raw = data.choices?.[0]?.message?.content || "";
-		raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+		const raw = data.choices?.[0]?.message?.content || "";
+		
+		// Processamento robusto do JSON retornado pela Groq
+		const parsed = extractJSON(raw);
 
-		const parsed = JSON.parse(raw);
 		return res.status(200).json({
 			code: parsed.code || "",
 			destination: parsed.destination || "ServerScriptService",
@@ -147,7 +165,7 @@ Responda OBRIGATORIAMENTE em JSON:
 		});
 	} catch (err) {
 		return res.status(200).json({ 
-			error: "Erro crítico de processamento: " + err.message, 
+			error: "Erro no parse da resposta da IA: " + err.message, 
 			destination: "ServerScriptService" 
 		});
 	}
