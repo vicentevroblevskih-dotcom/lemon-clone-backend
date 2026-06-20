@@ -43,8 +43,16 @@ Exemplo: precisa de um RemoteEvent chamado "BuyItem" em ReplicatedStorage? Adici
 "Parent" deve ser um destes: "ReplicatedStorage", "ServerStorage", "ServerScriptService", "Workspace".
 Se nao precisar de nenhum objeto auxiliar, retorne "auxObjects": [].
 
+REGRA IMPORTANTE SOBRE ELEMENTOS VISUAIS ANEXADOS A PERSONAGENS/PARTES (tags flutuantes, indicadores acima da cabeca, BillboardGui, status visual tipo "AFK", nivel, vida, nome customizado, etc):
+NUNCA construa esses elementos visuais via Instance.new() dentro do codigo (BillboardGui, TextLabel, ImageLabel feitos linha por linha no script SEMPRE ficam invisiveis ou bugados nesse contexto). Em vez disso, defina um "template" pronto (a arvore completa do elemento, ex: BillboardGui > Frame > TextLabel) no campo "templates", e no codigo apenas CLONE esse template em runtime e parente no lugar certo (ex: no Head do personagem).
+Formato de "templates": array de objetos {"Name": "NomeDoTemplate", "tree": { ...mesmo formato de node usado em GUI: ClassName, Name, Properties, Children... }}.
+Os templates sao salvos em ReplicatedStorage dentro de uma pasta "Templates" (criada automaticamente). No codigo, pegue assim: local template = game:GetService("ReplicatedStorage"):WaitForChild("Templates"):WaitForChild("NomeDoTemplate"); depois local clone = template:Clone(); clone.Parent = character:WaitForChild("Head") (ou outro alvo apropriado).
+Tipos especiais de valor dentro de "tree" (mesmos da GUI): UDim2 {"__type":"UDim2","v":[xS,xO,yS,yO]}, UDim {"__type":"UDim","v":[s,o]}, Color3 {"__type":"Color3","v":[r,g,b]}, Vector2 {"__type":"Vector2","v":[x,y]}, Enum {"__type":"Enum","v":"Font.GothamBold"}.
+Exemplo de uso: tag de "AFK" acima da cabeca = template "AfkTag" com BillboardGui (Size UDim2 [0,80,0,30], AlwaysOnTop true, StudsOffset Vector3 nao suportado entao use apenas propriedades 2D) contendo um TextLabel com Text "AFK", fundo semi-transparente e cantos arredondados (UICorner).
+Se nao precisar de nenhum template visual, retorne "templates": [].
+
 Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
-{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha", "auxObjects": [{"ClassName": "RemoteEvent", "Name": "NomeDoEvento", "Parent": "ReplicatedStorage"}]}
+{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha", "auxObjects": [{"ClassName": "RemoteEvent", "Name": "NomeDoEvento", "Parent": "ReplicatedStorage"}], "templates": [{"Name": "NomeDoTemplate", "tree": { "ClassName": "BillboardGui", "Name": "NomeDoTemplate", "Properties": {}, "Children": [] }}]}
 
 Siga boas praticas: use 'local', evite globais, nomes claros em ingles, PascalCase para servicos.`;
 
@@ -219,11 +227,16 @@ export default async function handler(req, res) {
 				? parsed.auxObjects.filter((obj) => obj && obj.ClassName && obj.Name && validAuxParents.includes(obj.Parent))
 				: [];
 
+			const templates = Array.isArray(parsed.templates)
+				? parsed.templates.filter((tpl) => tpl && tpl.Name && tpl.tree && tpl.tree.ClassName)
+				: [];
+
 			return res.status(200).json({
 				kind: "script",
 				destination,
 				code: parsed.code,
 				auxObjects,
+				templates,
 			});
 		}
 	} catch (err) {
