@@ -1,21 +1,13 @@
 // api/generate.js
-//
-// Motor híbrido atualizado com extrator robusto de JSON para evitar quebras por texto conversacional.
+// Motor híbrido: Gemini 3.5 Flash para UI (Instâncias), Groq para Scripts (Luau).
 
 function extractJSON(text) {
-	// Remove marcações de bloco de código comuns que as IAs colocam por teimosia
 	let cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
-	
-	// Localiza o primeiro '{' e o último '}'
 	const firstBrace = cleaned.indexOf('{');
 	const lastBrace = cleaned.lastIndexOf('}');
-	
 	if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-		const jsonString = cleaned.substring(firstBrace, lastBrace + 1);
-		return JSON.parse(jsonString);
+		return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
 	}
-	
-	// Se falhar, tenta dar parse direto no texto limpo
 	return JSON.parse(cleaned);
 }
 
@@ -24,146 +16,50 @@ export default async function handler(req, res) {
 	res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 	res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-	if (req.method === "OPTIONS") {
-		return res.status(200).end();
-	}
+	if (req.method === "OPTIONS") return res.status(200).end();
+	if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
 
-	if (req.method !== "POST") {
-		return res.status(405).json({ error: "Utilize POST." });
-	}
+	const { prompt } = req.body || {};
+	if (!prompt) return res.status(400).json({ error: "Prompt obrigatório." });
 
-	const { prompt, existingCode } = req.body || {};
-
-	if (!prompt || typeof prompt !== "string") {
-		return res.status(400).json({ error: "Campo 'prompt' obrigatório." });
-	}
-
-	// Identificar se o usuário está pedindo uma interface
-	const isGuiRequest = prompt.toLowerCase().includes("gui") || 
-	                     prompt.toLowerCase().includes("tela") || 
-	                     prompt.toLowerCase().includes("loja") || 
-	                     prompt.toLowerCase().includes("hud") || 
-	                     prompt.toLowerCase().includes("menu") || 
-	                     prompt.toLowerCase().includes("button") || 
-	                     prompt.toLowerCase().includes("botao");
-
+	const isGuiRequest = /gui|tela|loja|hud|menu|button|frame/i.test(prompt);
 	const geminiKey = process.env.GEMINI_API_KEY;
-	const groqKey = process.env.GROQ_API_KEY;
 
 	if (isGuiRequest && geminiKey) {
-		const systemPrompt = `Você é uma UI/UX Designer Profissional de Roblox Studio. 
-Sua tarefa é criar interfaces de altíssimo nível visual, limpas e modernas.
-Como o destino é "StarterGui", você NÃO vai gerar código Luau. O campo "code" deve conter obrigatoriamente um array JSON estruturado com a árvore de elementos físicos a serem criados.
-
-Use sempre UICorner (cantos arredondados entre 0.8 e 0.12), UIGradient (para dar profundidade nos frames e botões) e UIPadding (para margens internas).
-Use cores modernas escuras (como "32,32,36") e cores de destaque vibrantes (como azul "0,162,255" ou amarelo "255,221,87").
-
-Formato OBRIGATÓRIO do campo "code" (string do array JSON de objetos):
-"[{\\"ClassName\\":\\"ScreenGui\\",\\"Name\\":\\"ShopGui\\",\\"Properties\\":{\\"IgnoreGuiInset\\":true},\\"Children\\":[{\\"ClassName\\":\\"Frame\\",\\"Name\\":\\"MainFrame\\",\\"Properties\\":{\\"Size\\":\\"0.4,0,0.6,0\\",\\"Position\\":\\"0.5,0,0.5,0\\",\\"AnchorPoint\\":\\"0.5,0.5\\",\\"BackgroundColor3\\":\\"32,32,36\\"},\\"Children\\":[{\\"ClassName\\":\\"UICorner\\",\\"Name\\":\\"FrameCorner\\",\\"Properties\\":{\\"CornerRadius\\":\\"0,10\\"}}]}]}]"
-
-Responda estritamente no formato JSON:
-{
-  "destination": "StarterGui",
-  "code": "STRING_DO_ARRAY_JSON_DE_INSTANCIAS_AQUI"
-}`;
+		const systemPrompt = `Você é um UI/UX Designer Profissional de Roblox.
+Sua tarefa é criar interfaces modernas. NÃO gere código Luau.
+Retorne APENAS um JSON representando a árvore de objetos físicos (ScreenGui, Frame, TextButton, etc).
+Formato: {"destination": "StarterGui", "code": [ { "ClassName": "ScreenGui", "Name": "ShopGui", "Properties": { ... }, "Children": [ ... ] } ] }`;
 
 		try {
 			const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json"
-				},
+				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					contents: [{
-						parts: [{ text: `Pedido do usuário: ${prompt}\n\nCódigo anterior opcional: ${existingCode || ""}` }]
-					}],
-					systemInstruction: {
-						parts: [{ text: systemPrompt }]
-					},
-					generationConfig: {
-						responseMimeType: "application/json",
-						temperature: 0.2
-					}
+					contents: [{ parts: [{ text: prompt }] }],
+					systemInstruction: { parts: [{ text: systemPrompt }] },
+					generationConfig: { responseMimeType: "application/json" }
 				})
 			});
-
-			if (!response.ok) {
-				const errText = await response.text();
-				throw new Error(errText);
-			}
-
 			const data = await response.json();
 			const textResult = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-			
-			// Processamento robusto do JSON
-			const parsedResult = extractJSON(textResult);
-
-			return res.status(200).json({
-				code: parsedResult.code || "",
-				destination: "StarterGui",
-				model: "Gemini 3.5 Flash"
-			});
+			const parsed = extractJSON(textResult);
+			return res.status(200).json({ code: JSON.stringify(parsed.code), destination: "StarterGui", model: "Gemini 3.5 Flash" });
 		} catch (err) {
-			// Fallback ou repasse amigável do erro
-			return res.status(200).json({
-				error: "Falha na chamada ao Gemini 3.5: " + err.message,
-				destination: "StarterGui",
-				model: "Gemini 3.5 Flash (Erro)"
-			});
+			return res.status(200).json({ error: "Erro Gemini: " + err.message, destination: "ServerScriptService" });
 		}
 	}
 
-	if (!groqKey) {
-		return res.status(200).json({ 
-			error: "Nenhuma chave de API (GROQ) configurada no backend da Vercel.", 
-			destination: "ServerScriptService" 
-		});
-	}
-
-	const systemPromptGroq = `Você é um programador Luau especialista em Roblox Studio.
-Sua tarefa é gerar código Luau limpo, otimizado e profissional de acordo com o pedido.
-Decida o destino com base das regras: "ServerScriptService", "StarterPlayerScripts", "StarterCharacterScripts", "Workspace", "ReplicatedStorage".
-
-Responda OBRIGATORIAMENTE em JSON:
-{"destination": "NOME_DO_DESTINO", "code": "CÓDIGO_LUAU_AQUI"}`;
-
-	try {
-		const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"Authorization": `Bearer ${groqKey}`
-			},
-			body: JSON.stringify({
-				model: "llama-3.3-70b-versatile",
-				messages: [
-					{ role: "system", content: systemPromptGroq },
-					{ role: "user", content: prompt }
-				],
-				max_tokens: 2000
-			})
-		});
-
-		if (!response.ok) {
-			const errText = await response.text();
-			return res.status(200).json({ error: "Erro na Groq: " + errText, destination: "ServerScriptService" });
-		}
-
-		const data = await response.json();
-		const raw = data.choices?.[0]?.message?.content || "";
-		
-		// Processamento robusto do JSON retornado pela Groq
-		const parsed = extractJSON(raw);
-
-		return res.status(200).json({
-			code: parsed.code || "",
-			destination: parsed.destination || "ServerScriptService",
-			model: "Llama 3.3 (Groq)"
-		});
-	} catch (err) {
-		return res.status(200).json({ 
-			error: "Erro no parse da resposta da IA: " + err.message, 
-			destination: "ServerScriptService" 
-		});
-	}
+	const groqKey = process.env.GROQ_API_KEY;
+	const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+		body: JSON.stringify({
+			model: "llama-3.3-70b-versatile",
+			messages: [{ role: "system", content: "Retorne JSON: {\"destination\": \"...\", \"code\": \"...luau...\"}" }, { role: "user", content: prompt }]
+		})
+	});
+	const data = await response.json();
+	const parsed = extractJSON(data.choices[0].message.content);
+	return res.status(200).json({ code: parsed.code, destination: parsed.destination || "ServerScriptService", model: "Llama 3.3 (Groq)" });
 }
