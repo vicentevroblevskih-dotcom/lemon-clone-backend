@@ -37,11 +37,16 @@ Regras de classificacao de destino (escolha UMA das opcoes abaixo, exatamente co
 
 Regra de ouro: se mencionar "personagem", "character", "humanoid", "animacao do jogador" -> "StarterCharacterScripts".
 
-Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
-{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha"}
+REGRA IMPORTANTE SOBRE OBJETOS AUXILIARES (RemoteEvent, RemoteFunction, Folder, BindableEvent, etc):
+NUNCA crie esses objetos via Instance.new() dentro do codigo do script. Em vez disso, liste-os no campo "auxObjects" pra serem criados de verdade no Explorer, e no codigo use SEMPRE ":WaitForChild('Nome')" pra pegar a referencia.
+Exemplo: precisa de um RemoteEvent chamado "BuyItem" em ReplicatedStorage? Adicione em auxObjects: {"ClassName":"RemoteEvent","Name":"BuyItem","Parent":"ReplicatedStorage"}, e no codigo use: local BuyItem = game:GetService("ReplicatedStorage"):WaitForChild("BuyItem").
+"Parent" deve ser um destes: "ReplicatedStorage", "ServerStorage", "ServerScriptService", "Workspace".
+Se nao precisar de nenhum objeto auxiliar, retorne "auxObjects": [].
 
-Siga boas praticas: use 'local', evite globais, nomes claros em ingles, PascalCase para servicos.
-Se envolver RemoteEvents, crie-os dentro de ReplicatedStorage quando necessario.`;
+Responda SOMENTE em JSON valido, sem markdown, sem cercas de codigo, no formato exato:
+{"destination": "UMA_DAS_OPCOES_ACIMA", "code": "codigo luau aqui, com \\n para quebras de linha", "auxObjects": [{"ClassName": "RemoteEvent", "Name": "NomeDoEvento", "Parent": "ReplicatedStorage"}]}
+
+Siga boas praticas: use 'local', evite globais, nomes claros em ingles, PascalCase para servicos.`;
 
 const GUI_SYSTEM_PROMPT = `Voce e um designer de UI/UX senior especializado em jogos Roblox modernos (estilo dos top jogos de 2025-2026: bem produzidos, limpos, com hierarquia visual clara).
 Sua tarefa: gerar uma ARVORE DE INSTANCES (nao um script!) que representa a interface pedida, pronta pra ser criada de verdade no Explorer do Roblox Studio.
@@ -209,10 +214,16 @@ export default async function handler(req, res) {
 				return res.status(502).json({ error: "A IA nao retornou codigo. Resposta cru: " + rawContent });
 			}
 
+			const validAuxParents = ["ReplicatedStorage", "ServerStorage", "ServerScriptService", "Workspace"];
+			const auxObjects = Array.isArray(parsed.auxObjects)
+				? parsed.auxObjects.filter((obj) => obj && obj.ClassName && obj.Name && validAuxParents.includes(obj.Parent))
+				: [];
+
 			return res.status(200).json({
 				kind: "script",
 				destination,
 				code: parsed.code,
+				auxObjects,
 			});
 		}
 	} catch (err) {
