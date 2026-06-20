@@ -10,12 +10,9 @@
 // (em vez de pedir pra IA escrever um script que constroi a UI via codigo,
 // o que costuma sair feio e fragil).
 //
-// Roteamento de modelo:
-// - Pedidos de GUI/UI/interface -> Gemini 3.5 Flash (melhor pra design visual)
-// - Demais pedidos (scripts de jogo, logica, etc) -> Groq (rapido e gratuito)
+// Modelo: Gemini 3.5 Flash para tudo (scripts normais e GUI).
 //
-// Variaveis de ambiente necessarias no Vercel:
-// - GROQ_API_KEY   (https://console.groq.com/keys)
+// Variavel de ambiente necessaria no Vercel:
 // - GEMINI_API_KEY (https://aistudio.google.com/app/apikey)
 
 function isGuiRequest(text) {
@@ -142,72 +139,40 @@ export default async function handler(req, res) {
 		return res.status(400).json({ error: "Campo 'prompt' obrigatorio." });
 	}
 
-	const useGemini = isGuiRequest(prompt);
+	const isGui = isGuiRequest(prompt);
 
-	const groqKey = process.env.GROQ_API_KEY;
 	const geminiKey = process.env.GEMINI_API_KEY;
 
-	if (useGemini && !geminiKey) {
+	if (!geminiKey) {
 		return res.status(500).json({ error: "GEMINI_API_KEY nao configurada no servidor." });
 	}
-	if (!useGemini && !groqKey) {
-		return res.status(500).json({ error: "GROQ_API_KEY nao configurada no servidor." });
-	}
 
-	const systemPrompt = useGemini ? GUI_SYSTEM_PROMPT : SCRIPT_SYSTEM_PROMPT;
+	const systemPrompt = isGui ? GUI_SYSTEM_PROMPT : SCRIPT_SYSTEM_PROMPT;
 
 	const userMessage = existingCode
 		? `Pedido do usuario: ${prompt}\n\nIMPORTANTE: ja existe algo anterior que precisa ser MODIFICADO (nao crie do zero, edite/expanda o que ja existe abaixo, aplicando a mudanca pedida):\n\n${existingCode}`
 		: prompt;
 
 	try {
-		let rawContent = "";
+		const model = "gemini-3.5-flash";
+		const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
-		if (useGemini) {
-			const model = "gemini-3.5-flash";
-			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+		const response = await fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				systemInstruction: { parts: [{ text: systemPrompt }] },
+				contents: [{ role: "user", parts: [{ text: userMessage }] }],
+			}),
+		});
 
-			const response = await fetch(url, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					systemInstruction: { parts: [{ text: systemPrompt }] },
-					contents: [{ role: "user", parts: [{ text: userMessage }] }],
-				}),
-			});
-
-			if (!response.ok) {
-				const errText = await response.text();
-				return res.status(502).json({ error: "Erro na API do Gemini: " + errText });
-			}
-
-			const data = await response.json();
-			rawContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-		} else {
-			const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"Authorization": `Bearer ${groqKey}`,
-				},
-				body: JSON.stringify({
-					model: "llama-3.3-70b-versatile",
-					messages: [
-						{ role: "system", content: systemPrompt },
-						{ role: "user", content: userMessage },
-					],
-					max_tokens: 3000,
-				}),
-			});
-
-			if (!response.ok) {
-				const errText = await response.text();
-				return res.status(502).json({ error: "Erro na API da Groq: " + errText });
-			}
-
-			const data = await response.json();
-			rawContent = data.choices?.[0]?.message?.content || "";
+		if (!response.ok) {
+			const errText = await response.text();
+			return res.status(502).json({ error: "Erro na API do Gemini: " + errText });
 		}
+
+		const data = await response.json();
+		const rawContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
 		const raw = rawContent.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
 
@@ -218,7 +183,7 @@ export default async function handler(req, res) {
 			return res.status(502).json({ error: "A IA nao respondeu em JSON valido. Resposta cru: " + rawContent });
 		}
 
-		if (useGemini) {
+		if (isGui) {
 			if (!parsed.guiTree) {
 				return res.status(502).json({ error: "A IA nao retornou guiTree. Resposta cru: " + rawContent });
 			}
