@@ -1,6 +1,7 @@
 // api/generate.js
 //
-// Motor híbrido: Usa Gemini 2.0 Flash (via GEMINI_API_KEY) para criar as interfaces (JSON)
+// Motor híbrido atualizado para 2026: 
+// Usa Gemini 3.5 Flash (via GEMINI_API_KEY) para criar as interfaces (JSON)
 // e Groq Llama 3.3 (via GROQ_API_KEY) para gerar os scripts normais (Luau).
 
 export default async function handler(req, res) {
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
 		return res.status(400).json({ error: "Campo 'prompt' obrigatório." });
 	}
 
-	// Identificar para onde enviar com base no pedido de interface
+	// Identificar se o usuário está pedindo uma interface
 	const isGuiRequest = prompt.toLowerCase().includes("gui") || 
 	                     prompt.toLowerCase().includes("tela") || 
 	                     prompt.toLowerCase().includes("loja") || 
@@ -34,7 +35,7 @@ export default async function handler(req, res) {
 	const geminiKey = process.env.GEMINI_API_KEY;
 	const groqKey = process.env.GROQ_API_KEY;
 
-	// Se for GUI e tiver a chave do Gemini, vamos usar o Gemini 2.0 Flash!
+	// Se for pedido de GUI e a chave do Gemini estiver configurada
 	if (isGuiRequest && geminiKey) {
 		const systemPrompt = `Você é uma UI/UX Designer Profissional de Roblox Studio. 
 Sua tarefa é criar interfaces de altíssimo nível visual, limpas e modernas.
@@ -44,7 +45,7 @@ Use sempre UICorner (cantos arredondados entre 0,8 e 0,12), UIGradient (para dar
 Use cores modernas escuras (como "32,32,36") e cores de destaque vibrantes (como azul "0,162,255" ou amarelo "255,221,87").
 
 Formato OBRIGATÓRIO do campo "code" (string do array JSON de objetos):
-"[{\\"ClassName\\":\\"ScreenGui\\",\\"Name\\":\\"ShopGui\\",\\"Properties\\":{\\"IgnoreGuiInset\\":true},\\"Children\\":[{\\"ClassName\\":\\"Frame\\",\\"Name\\":\\"MainFrame\\",\\"Properties\\":{\\"Size\\":\\"0.4,0,0.6,0\\",\\"Position\\":\\"0.5,0,0.5,0\\",\\"AnchorPoint\\":\\"0.5,0.5\\",\\"BackgroundColor3\\":\\"32,32,36\\"},\\"Children\\":[{\\"ClassName\\":\\"UICorner\\",\\"Name\\":\\"FrameCorner\\",\\"Properties\\":{\\"CornerRadius\\":\\"0,10\\"}}]}]}]"
+"[{\"ClassName\":\"ScreenGui\",\"Name\":\"ShopGui\",\"Properties\":{\"IgnoreGuiInset\":true},\"Children\":[{\"ClassName\":\"Frame\",\"Name\":\"MainFrame\",\"Properties\":{\"Size\":\"0.4,0,0.6,0\",\"Position\":\"0.5,0,0.5,0\",\"AnchorPoint\":\"0.5,0.5\",\"BackgroundColor3\":\"32,32,36\"},\"Children\":[{\"ClassName\":\"UICorner\",\"Name\":\"FrameCorner\",\"Properties\":{\"CornerRadius\":\"0,10\"}}]}]}]"
 
 Responda estritamente no formato JSON:
 {
@@ -53,7 +54,8 @@ Responda estritamente no formato JSON:
 }`;
 
 		try {
-			const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+			// Atualizado para o modelo ativo: gemini-3.5-flash
+			const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiKey}`, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json"
@@ -73,7 +75,8 @@ Responda estritamente no formato JSON:
 			});
 
 			if (!response.ok) {
-				throw new Error(await response.text());
+				const errText = await response.text();
+				throw new Error(errText);
 			}
 
 			const data = await response.json();
@@ -83,18 +86,22 @@ Responda estritamente no formato JSON:
 			return res.status(200).json({
 				code: parsedResult.code || "",
 				destination: "StarterGui",
-				model: "Gemini 2.0 Flash"
+				model: "Gemini 3.5 Flash"
 			});
 		} catch (err) {
-			// Se o Gemini falhar por algum motivo, deixa cair no fallback do Groq abaixo
-			console.error("Falha no Gemini, tentando Groq:", err.message);
+			// Em vez de fallback silencioso, retorna o erro exato do Gemini para depuração
+			return res.status(200).json({
+				error: "Falha na API do Gemini 3.5: " + err.message,
+				destination: "StarterGui",
+				model: "Gemini 3.5 Flash (Erro)"
+			});
 		}
 	}
 
 	// FALLBACK OU SCRIPTS GERAIS (Groq Llama 3.3)
 	if (!groqKey) {
 		return res.status(200).json({ 
-			error: "Nenhuma chave de API configurada no backend (Vercel).", 
+			error: "Nenhuma chave de API (GROQ) configurada no backend.", 
 			destination: "ServerScriptService" 
 		});
 	}
