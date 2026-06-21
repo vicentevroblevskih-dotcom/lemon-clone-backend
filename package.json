@@ -1,6 +1,10 @@
 {
   "name": "lemon-clone-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Backend que recebe pedidos do plugin de Roblox Studio e gera codigo Luau via IA."
+  "description": "Backend + site do Lemon Clone AI: gera Luau/GUI/construcoes 3D via IA, com login, historico e chave pessoal.",
+  "dependencies": {
+    "@upstash/redis": "^1.34.0",
+    "bcryptjs": "^2.4.3"
+  }
 }

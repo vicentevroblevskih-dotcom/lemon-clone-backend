@@ -1,47 +1,37 @@
-# Lemon Clone - Backend
+# Lemon Clone AI — Backend + Site
 
-Backend simples (1 funcao serverless) que recebe um pedido em texto e devolve
-codigo Luau gerado por IA, pra ser usado pelo plugin do Roblox Studio.
+Esse repositorio tem duas partes:
+- `api/` — as funcoes serverless (geracao de codigo/GUI/construcoes via IA, login, historico)
+- `index.html` — o site (login, cadastro, dashboard com historico e configuracao da API key)
 
-## Como subir no Vercel (passo a passo)
+## 1. Configurar o banco de dados (Upstash Redis, gratuito)
 
-1. Crie uma conta no GitHub (https://github.com) se ainda nao tiver.
-2. Crie um repositorio novo no GitHub, ex: `lemon-clone-backend`.
-3. Suba esta pasta (`backend/`) pro repositorio:
-   - Pelo site do GitHub: clique em "Add file > Upload files" e arraste os
-     arquivos `api/generate.js`, `package.json` e este `README.md`.
-   - Ou via git no terminal:
-     ```
-     git init
-     git add .
-     git commit -m "primeiro commit"
-     git branch -M main
-     git remote add origin https://github.com/SEU_USUARIO/lemon-clone-backend.git
-     git push -u origin main
-     ```
-4. No Vercel (https://vercel.com/new), clique em "Continue with GitHub",
-   autorize o acesso, e selecione o repositorio `lemon-clone-backend`.
-5. Antes de clicar em "Deploy", abra "Environment Variables" e adicione:
-   - Nome: `ANTHROPIC_API_KEY`
-   - Valor: sua chave da API da Anthropic (pegue em https://console.anthropic.com)
-6. Clique em "Deploy". Em ~1 minuto o Vercel te da uma URL, tipo:
-   `https://lemon-clone-backend.vercel.app`
-7. O endpoint da sua funcao vai ser:
-   `https://lemon-clone-backend.vercel.app/api/generate`
-8. Cole essa URL completa (com `/api/generate` no final) no campo de URL
-   do plugin do Roblox Studio.
+O Vercel KV antigo foi descontinuado. Agora usamos o **Upstash** (Redis sem servidor, gratuito):
 
-## Testando sem o plugin
+1. No seu projeto no Vercel, vai na aba **Storage**
+2. Na secao "Marketplace Database Providers", clica em **Upstash**
+3. Escolhe a opcao de criar um banco **Redis**
+4. Da um nome (ex: `lemon-clone-redis`) e segue o fluxo de criacao (plano gratuito)
+5. Clica em **Connect to Project** e seleciona o seu projeto (`lemon-clone-backend3` ou o nome que voce usou)
+6. Isso adiciona automaticamente as variaveis de ambiente `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` — voce nao precisa configurar nada manualmente
 
-Voce pode testar o backend direto pelo terminal ou por um site como
-https://hoppscotch.io, mandando um POST para a URL com o corpo:
+## 2. Variaveis de ambiente
 
-```json
-{ "prompt": "crie um script que faz uma parte girar infinitamente" }
-```
+Continua precisando da chave padrao do servidor (usada quando o usuario do plugin nao esta logado ou nao configurou a propria chave):
 
-A resposta deve ser:
+- `GEMINI_API_KEY` (https://aistudio.google.com/app/apikey)
 
-```json
-{ "code": "local part = ... " }
-```
+As variaveis do Upstash sao adicionadas automaticamente no passo 1.
+
+## 3. Deploy
+
+Mesmo processo de sempre: sobe os arquivos pro GitHub (mantendo a estrutura de pastas exata: `index.html` na raiz, `api/` com todos os arquivos dentro), conecta no Vercel, espera o deploy.
+
+## 4. Usando o site
+
+1. Acessa a URL do seu site (ex: `https://lemon-clone-backend3.vercel.app`)
+2. Cria uma conta ou faz login
+3. (Opcional) Cola sua propria chave do Gemini em "Sua chave do Gemini" — assim voce usa sua propria cota em vez da do servidor
+4. Copia o "Token de login" mostrado no painel
+5. No plugin do Roblox Studio, cola esse token no campo **"Token de login"**
+6. A partir dai, toda geracao feita pelo plugin aparece no historico do site, e usa sua chave pessoal se configurada

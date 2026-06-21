@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lemon Clone AI</title>
+<style>
+	:root {
+		--bg: #16161a;
+		--card: #1f1f24;
+		--card-2: #26262d;
+		--border: rgba(255,255,255,0.08);
+		--text: #f0f0f2;
+		--text-dim: #9a9aa4;
+		--accent: #ffdd57;
+		--accent-dark: #1a1a1a;
+		--danger: #ef5350;
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+		background: var(--bg);
+		color: var(--text);
+		min-height: 100vh;
+	}
+	.topbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px 24px;
+		border-bottom: 1px solid var(--border);
+	}
+	.brand {
+		font-weight: 800;
+		font-size: 18px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.brand span.dot { color: var(--accent); }
+	.container {
+		max-width: 960px;
+		margin: 0 auto;
+		padding: 32px 20px 80px;
+	}
+	.hidden { display: none !important; }
+	.card {
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 16px;
+		padding: 24px;
+		margin-bottom: 20px;
+	}
+	h1 { font-size: 26px; margin: 0 0 8px; }
+	h2 { font-size: 18px; margin: 0 0 16px; }
+	p.subtitle { color: var(--text-dim); margin: 0 0 24px; }
+	label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+	input {
+		width: 100%;
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--card-2);
+		color: var(--text);
+		font-size: 14px;
+		margin-bottom: 14px;
+	}
+	input:focus { outline: 1px solid var(--accent); }
+	button {
+		cursor: pointer;
+		border: none;
+		border-radius: 10px;
+		padding: 11px 18px;
+		font-size: 14px;
+		font-weight: 700;
+	}
+	.btn-primary { background: var(--accent); color: var(--accent-dark); }
+	.btn-secondary { background: var(--card-2); color: var(--text); border: 1px solid var(--border); }
+	.btn-danger { background: transparent; color: var(--danger); border: 1px solid rgba(239,83,80,0.4); }
+	.row { display: flex; gap: 10px; flex-wrap: wrap; }
+	.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+	.tab {
+		padding: 8px 14px;
+		border-radius: 8px;
+		cursor: pointer;
+		color: var(--text-dim);
+		font-size: 14px;
+		font-weight: 600;
+	}
+	.tab.active { background: var(--card-2); color: var(--text); }
+	.msg { font-size: 13px; margin-top: -4px; margin-bottom: 12px; }
+	.msg.error { color: var(--danger); }
+	.msg.ok { color: #58d996; }
+	.history-item {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 12px 14px;
+		margin-bottom: 10px;
+		background: var(--card-2);
+	}
+	.history-item .top { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+	.tag {
+		font-size: 11px;
+		font-weight: 700;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: rgba(255,221,87,0.15);
+		color: var(--accent);
+		text-transform: uppercase;
+	}
+	.history-item .prompt { font-size: 14px; color: var(--text); }
+	.history-item .meta { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+	.empty { color: var(--text-dim); font-size: 14px; text-align: center; padding: 30px 0; }
+	code.inline {
+		background: var(--card-2);
+		padding: 2px 6px;
+		border-radius: 6px;
+		font-size: 13px;
+	}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+	<div class="brand">🍋 <span>Lemon Clone <span class="dot">AI</span></span></div>
+	<div id="topbarActions"></div>
+</div>
+
+<div class="container">
+
+	<!-- TELA DESLOGADA -->
+	<div id="authScreen">
+		<h1>Gere scripts, GUIs e construções pro Roblox com IA</h1>
+		<p class="subtitle">Crie sua conta pra configurar sua própria chave do Gemini e ver o histórico do que você já gerou.</p>
+
+		<div class="card" style="max-width: 420px;">
+			<div class="tabs">
+				<div class="tab active" data-tab="login" onclick="switchTab('login')">Entrar</div>
+				<div class="tab" data-tab="signup" onclick="switchTab('signup')">Criar conta</div>
+			</div>
+
+			<div id="loginForm">
+				<label>Email</label>
+				<input type="email" id="loginEmail" placeholder="voce@exemplo.com" />
+				<label>Senha</label>
+				<input type="password" id="loginPassword" placeholder="••••••••" />
+				<div class="msg error hidden" id="loginMsg"></div>
+				<button class="btn-primary" style="width:100%" onclick="doLogin()">Entrar</button>
+			</div>
+
+			<div id="signupForm" class="hidden">
+				<label>Email</label>
+				<input type="email" id="signupEmail" placeholder="voce@exemplo.com" />
+				<label>Senha (mínimo 6 caracteres)</label>
+				<input type="password" id="signupPassword" placeholder="••••••••" />
+				<div class="msg error hidden" id="signupMsg"></div>
+				<button class="btn-primary" style="width:100%" onclick="doSignup()">Criar conta</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- TELA LOGADA (DASHBOARD) -->
+	<div id="dashboard" class="hidden">
+		<h1>Seu painel</h1>
+		<p class="subtitle">Logado como <strong id="userEmailLabel"></strong></p>
+
+		<div class="card">
+			<h2>Sua chave do Gemini</h2>
+			<p class="subtitle" style="margin-bottom:14px;">
+				Configure aqui sua própria chave da API do Gemini (grátis em
+				<a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a>).
+				Quando configurada, o plugin do Roblox Studio passa a usar ela em vez da chave padrão do servidor.
+			</p>
+			<label>API Key</label>
+			<input type="password" id="apiKeyInput" placeholder="AIza..." />
+			<div class="msg hidden" id="apiKeyMsg"></div>
+			<div class="row">
+				<button class="btn-primary" onclick="saveApiKey()">Salvar chave</button>
+				<button class="btn-danger" onclick="removeApiKey()">Remover chave</button>
+			</div>
+		</div>
+
+		<div class="card">
+			<h2>Como conectar no plugin do Studio</h2>
+			<p class="subtitle" style="margin-bottom:0;">
+				No painel do plugin, no campo <code class="inline">Token de login</code>, cole o token abaixo.
+				Ele autentica suas requisições e libera o uso da sua chave pessoal + histórico.
+			</p>
+			<div class="row" style="margin-top:14px;">
+				<input type="text" id="tokenDisplay" readonly style="margin-bottom:0;" />
+				<button class="btn-secondary" onclick="copyToken()">Copiar token</button>
+			</div>
+		</div>
+
+		<div class="card">
+			<h2>Histórico de gerações</h2>
+			<div id="historyList"></div>
+		</div>
+
+		<button class="btn-secondary" onclick="logout()">Sair da conta</button>
+	</div>
+
+</div>
+
+<script>
+const API_BASE = ""; // mesma origem (Vercel)
+
+function getToken() { return localStorage.getItem("lemonToken"); }
+function setToken(t) { localStorage.setItem("lemonToken", t); }
+function clearToken() { localStorage.removeItem("lemonToken"); }
+
+function switchTab(tab) {
+	document.querySelectorAll(".tab").forEach(el => el.classList.toggle("active", el.dataset.tab === tab));
+	document.getElementById("loginForm").classList.toggle("hidden", tab !== "login");
+	document.getElementById("signupForm").classList.toggle("hidden", tab !== "signup");
+}
+
+function showMsg(elId, text, type) {
+	const el = document.getElementById(elId);
+	el.textContent = text;
+	el.className = "msg " + type;
+	el.classList.remove("hidden");
+}
+
+async function doLogin() {
+	const email = document.getElementById("loginEmail").value.trim();
+	const password = document.getElementById("loginPassword").value;
+	try {
+		const r = await fetch(API_BASE + "/api/auth/login", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ email, password }),
+		});
+		const data = await r.json();
+		if (!r.ok) { showMsg("loginMsg", data.error || "Erro ao entrar.", "error"); return; }
+		setToken(data.token);
+		await loadDashboard();
+	} catch (e) {
+		showMsg("loginMsg", "Erro de conexao: " + e.message, "error");
+	}
+}
+
+async function doSignup() {
+	const email = document.getElementById("signupEmail").value.trim();
+	const password = document.getElementById("signupPassword").value;
+	try {
+		const r = await fetch(API_BASE + "/api/auth/signup", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ email, password }),
+		});
+		const data = await r.json();
+		if (!r.ok) { showMsg("signupMsg", data.error || "Erro ao criar conta.", "error"); return; }
+		setToken(data.token);
+		await loadDashboard();
+	} catch (e) {
+		showMsg("signupMsg", "Erro de conexao: " + e.message, "error");
+	}
+}
+
+function logout() {
+	clearToken();
+	document.getElementById("dashboard").classList.add("hidden");
+	document.getElementById("authScreen").classList.remove("hidden");
+	document.getElementById("topbarActions").innerHTML = "";
+}
+
+async function loadDashboard() {
+	const token = getToken();
+	if (!token) return;
+
+	const meRes = await fetch(API_BASE + "/api/user/me", {
+		headers: { Authorization: "Bearer " + token },
+	});
+	if (!meRes.ok) { clearToken(); return; }
+	const me = await meRes.json();
+
+	document.getElementById("authScreen").classList.add("hidden");
+	document.getElementById("dashboard").classList.remove("hidden");
+	document.getElementById("userEmailLabel").textContent = me.email;
+	document.getElementById("tokenDisplay").value = token;
+	document.getElementById("topbarActions").innerHTML =
+		'<button class="btn-secondary" onclick="logout()">Sair</button>';
+
+	if (me.hasApiKey) {
+		document.getElementById("apiKeyInput").placeholder = "•••••••• (chave configurada)";
+	}
+
+	await loadHistory();
+}
+
+async function saveApiKey() {
+	const token = getToken();
+	const apiKey = document.getElementById("apiKeyInput").value.trim();
+	if (!apiKey) { showMsg("apiKeyMsg", "Digite uma chave antes de salvar.", "error"); return; }
+
+	const r = await fetch(API_BASE + "/api/user/apikey", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+		body: JSON.stringify({ apiKey }),
+	});
+	const data = await r.json();
+	if (!r.ok) { showMsg("apiKeyMsg", data.error || "Erro ao salvar.", "error"); return; }
+	showMsg("apiKeyMsg", "Chave salva com sucesso!", "ok");
+	document.getElementById("apiKeyInput").value = "";
+	document.getElementById("apiKeyInput").placeholder = "•••••••• (chave configurada)";
+}
+
+async function removeApiKey() {
+	const token = getToken();
+	const r = await fetch(API_BASE + "/api/user/apikey", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+		body: JSON.stringify({ apiKey: "" }),
+	});
+	const data = await r.json();
+	if (!r.ok) { showMsg("apiKeyMsg", data.error || "Erro ao remover.", "error"); return; }
+	showMsg("apiKeyMsg", "Chave removida. Voltando a usar a chave padrao do servidor.", "ok");
+	document.getElementById("apiKeyInput").placeholder = "AIza...";
+}
+
+function copyToken() {
+	const input = document.getElementById("tokenDisplay");
+	input.select();
+	document.execCommand("copy");
+}
+
+async function loadHistory() {
+	const token = getToken();
+	const r = await fetch(API_BASE + "/api/history", {
+		headers: { Authorization: "Bearer " + token },
+	});
+	const data = await r.json();
+	const list = document.getElementById("historyList");
+
+	if (!data.history || data.history.length === 0) {
+		list.innerHTML = '<div class="empty">Nenhuma geracao ainda. Use o plugin no Roblox Studio com seu token pra ver o historico aqui.</div>';
+		return;
+	}
+
+	list.innerHTML = data.history.map(item => {
+		const date = new Date(item.createdAt).toLocaleString("pt-BR");
+		return `
+			<div class="history-item">
+				<div class="top">
+					<span class="tag">${item.kind}</span>
+					<span class="meta">${date}</span>
+				</div>
+				<div class="prompt">${escapeHtml(item.prompt)}</div>
+				${item.destination ? `<div class="meta">Destino: ${item.destination}</div>` : ""}
+			</div>
+		`;
+	}).join("");
+}
+
+function escapeHtml(str) {
+	const div = document.createElement("div");
+	div.textContent = str;
+	return div.innerHTML;
+}
+
+// Inicializacao
+(async function init() {
+	if (getToken()) {
+		await loadDashboard();
+	}
+})();
+</script>
+
+</body>
+</html>
